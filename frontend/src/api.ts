@@ -6,7 +6,9 @@
  * FastAPI server. It centralizes the API base URL and response handling.
  */
 
-const API = "http://localhost:15000";
+// In production (when built), use relative paths (same domain as frontend)
+// In development, use localhost:15000
+const API = import.meta.env.PROD ? "" : "http://localhost:15000";
 
 // Generic HTTP helper that wraps fetch with default headers and error handling.
 async function http<T>(path: string, options?: RequestInit): Promise<T> {

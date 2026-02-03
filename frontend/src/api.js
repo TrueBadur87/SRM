@@ -5,7 +5,9 @@
  * backend as well as helper functions to perform HTTP requests to the
  * FastAPI server. It centralizes the API base URL and response handling.
  */
-const API = "http://localhost:15000";
+// In production, use relative paths (same domain as frontend)
+// In development, use localhost:15000
+const API = window.location.hostname === 'localhost' ? "http://localhost:15000" : "";
 // Generic HTTP helper that wraps fetch with default headers and error handling.
 async function http(path, options) {
     const res = await fetch(`${API}${path}`, {
