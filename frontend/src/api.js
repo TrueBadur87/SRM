@@ -5,9 +5,9 @@
  * backend as well as helper functions to perform HTTP requests to the
  * FastAPI server. It centralizes the API base URL and response handling.
  */
-// In production, use relative paths (same domain as frontend)
+// In production (when built), use relative paths (same domain as frontend)
 // In development, use localhost:15000
-const API = window.location.hostname === 'localhost' ? "http://localhost:15000" : "";
+const API = import.meta.env.PROD ? "" : "http://localhost:15000";
 // Generic HTTP helper that wraps fetch with default headers and error handling.
 async function http(path, options) {
     const res = await fetch(`${API}${path}`, {
