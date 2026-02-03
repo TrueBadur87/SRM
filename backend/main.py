@@ -31,20 +31,33 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Recruiting CRM", version="1.1")
 
 # Configure CORS so that the React frontend can communicate with this API
-# In production, allow all origins since frontend is served from the same domain
 import os
-is_production = os.getenv("RENDER") is not None
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"] if is_production else [
-        "http://localhost:5173", "http://127.0.0.1:5173",
-        "http://localhost:15000", "http://127.0.0.1:15000"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Detect if running on Render.com or other production environment
+is_production = os.getenv("RENDER") is not None or os.getenv("PORT") is not None
+
+if is_production:
+    # In production, frontend is served from the same domain, so we allow all
+    # Note: allow_credentials must be False when using allow_origins=["*"]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    # In development, allow specific local origins with credentials
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:5173", "http://127.0.0.1:5173",
+            "http://localhost:15000", "http://127.0.0.1:15000"
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Mount static files from frontend/dist
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
