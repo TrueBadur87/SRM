@@ -41,7 +41,7 @@ function Modal(props: { open: boolean; title: string; onClose: () => void; child
             Закрыть
           </button>
         </div>
-        <div className="p-4">{props.children}</div>
+        <div className="p-4 max-h-[80vh] overflow-auto">{props.children}</div>
       </div>
     </div>
   );
@@ -54,7 +54,8 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
       {...props}
       className={
         "w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none " +
-        "placeholder:text-slate-500 focus:border-sky-500/40"
+        "text-[color:var(--app-input-text)] placeholder:text-slate-500 " +
+        "focus:border-sky-500/40"
       }
     />
   );
@@ -67,7 +68,7 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
       {...props}
       className={
         "w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none " +
-        "focus:border-sky-500/40"
+        "text-[color:var(--app-input-text)] focus:border-sky-500/40"
       }
     />
   );
@@ -124,6 +125,7 @@ function downloadCSV(filename: string, rows: Array<Record<string, unknown>>) {
 const THEME_KEY = "crm.theme";
 const TOKEN_KEY = "crm.token";
 const REMEMBER_KEY = "crm.remember";
+const TEXT_ZOOM_KEY = "crm.textZoom";
 const TIPS = [
   "Лайфхак: оплата теперь “правильная” через платежи — можно разбивать на части. Воронка показывает сумму всех платежей и последнюю дату.",
   "Совет: если всё вводить правильно с первого раза, потом не придётся ничего менять.",
@@ -143,6 +145,10 @@ export default function App() {
     if (stored === "light" || stored === "dark") return stored;
     if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
     return "light";
+  });
+  const [textZoom, setTextZoom] = useState<number>(() => {
+    const stored = Number(localStorage.getItem(TEXT_ZOOM_KEY) || "100");
+    return Number.isFinite(stored) && stored >= 80 && stored <= 140 ? stored : 100;
   });
 
   const [authUser, setAuthUser] = useState<User | null>(null);
@@ -192,6 +198,7 @@ export default function App() {
   const [newUser, setNewUser] = useState({ username: "", password: "", role: "user" as "admin" | "user", recruiter_id: "" as number | "" });
   const [openEditUser, setOpenEditUser] = useState<User | null>(null);
   const [editUser, setEditUser] = useState({ username: "", password: "", role: "user" as "admin" | "user", recruiter_id: "" as number | "" });
+  const [showTax, setShowTax] = useState(false);
 
 
   // Application form initial values
@@ -309,7 +316,34 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(THEME_KEY, theme);
+    const root = document.documentElement;
+    root.style.setProperty("--app-input-text", theme === "dark" ? "#f1f5f9" : "#0f172a");
   }, [theme]);
+  useEffect(() => {
+    const html = document.documentElement;
+    const prev = html.style.scrollbarGutter;
+    html.style.scrollbarGutter = "stable";
+    return () => {
+      html.style.scrollbarGutter = prev;
+    };
+  }, []);
+  useEffect(() => {
+    const body = document.body;
+    const prev = body.style.overflowY;
+    body.style.overflowY = "scroll";
+    return () => {
+      body.style.overflowY = prev;
+    };
+  }, []);
+  useEffect(() => {
+    localStorage.setItem(TEXT_ZOOM_KEY, String(textZoom));
+  }, [textZoom]);
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${textZoom}%`;
+    return () => {
+      document.documentElement.style.fontSize = "";
+    };
+  }, [textZoom]);
 
   useEffect(() => {
     localStorage.setItem(REMEMBER_KEY, String(rememberUser));
@@ -372,6 +406,7 @@ export default function App() {
     const paidSum = pipeline.reduce((sum, p) => sum + (p.payment_amount || 0), 0);
     return { total, hired, paidCount, paidSum: Math.round(paidSum * 100) / 100 };
   }, [pipeline]);
+  const formatMoneyUA = (value: number) => value.toFixed(2).replace(".", ",");
 
   // Create a client
   async function addClient() {
@@ -750,6 +785,9 @@ export default function App() {
   const [repMonth, setRepMonth] = useState(now.getMonth() + 1);
   const [repTotal, setRepTotal] = useState<number | null>(null);
   const [repItems, setRepItems] = useState<any[]>([]);
+  useEffect(() => {
+    setShowTax(false);
+  }, [repTotal, repYear, repMonth]);
 
   // Load earnings report for selected year and month
   async function loadReport() {
@@ -829,6 +867,60 @@ export default function App() {
   // UI Rendering
   return (
     <div className="min-h-screen">
+      <div className="fixed inset-0 z-50 pointer-events-none">
+        <div
+          className="absolute rounded-2xl border border-white/10 bg-slate-950/80 shadow-lg backdrop-blur pointer-events-auto"
+          style={{
+            left: "calc(100vw - 80px)",
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: 64,
+            height: 200,
+            fontSize: 12,
+            position: "relative",
+          }}
+        >
+          <div
+            className="uppercase tracking-wide text-slate-400"
+            style={{ fontSize: 10, position: "absolute", top: 10, left: 10 }}
+          >
+            Zoom
+          </div>
+          <div
+            style={{
+              position: "absolute",
+              top: 34,
+              left: 10,
+              right: 10,
+              bottom: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            }}
+          >
+            <input
+              type="range"
+              min={80}
+              max={140}
+              step={5}
+              value={textZoom}
+              onChange={(e) => setTextZoom(Number(e.target.value))}
+              className="cursor-pointer accent-sky-400"
+              style={{
+                width: 140,
+                height: 16,
+                transform: "rotate(-90deg)",
+                transformOrigin: "center",
+              }}
+              aria-label="Text zoom"
+            />
+            <div className="text-slate-300" style={{ width: 40, textAlign: "right", fontSize: 12 }}>
+              {textZoom}%
+            </div>
+          </div>
+        </div>
+      </div>
       {/* Header */}
       <div className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/80 backdrop-blur">
         <div className="mx-auto max-w-6xl px-4 py-4">
@@ -1791,12 +1883,57 @@ export default function App() {
                     Экспорт CSV
                   </Button>
                 </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="ghost"
+                    onClick={() => setShowTax((v) => !v)}
+                    disabled={repTotal == null}
+                  >
+                    {showTax ? "Скрыть налог" : "Показать налог"}
+                  </Button>
+                </div>
               </div>
               <div className="text-right">
                 <div className="text-xs text-slate-400">Итого за месяц</div>
                 <div className="text-2xl font-semibold">{repTotal ?? "-"}</div>
               </div>
             </div>
+            {showTax && repTotal != null && (
+              <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-sm">
+                {(() => {
+                  const income = repTotal;
+                  const singleTax = income * 0.05;
+                  const militaryTax = income * 0.01;
+                  const esv = 1902.34;
+                  const totalTax = singleTax + militaryTax + esv;
+                  const net = income - totalTax;
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-xs text-slate-400 mb-1">Єдиний податок (5%)</div>
+                        <div className="font-semibold">{formatMoneyUA(singleTax)} грн</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-400 mb-1">Військовий збір (1%)</div>
+                        <div className="font-semibold">{formatMoneyUA(militaryTax)} грн</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-400 mb-1">ЄСВ (мінімум)</div>
+                        <div className="font-semibold">{formatMoneyUA(esv)} грн</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-400 mb-1">Усього податків</div>
+                        <div className="text-lg font-semibold">{formatMoneyUA(totalTax)} грн</div>
+                      </div>
+                      <div className="md:col-span-2">
+                        <div className="text-xs text-slate-400 mb-1">Дохід після податків</div>
+                        <div className="text-lg font-semibold">{formatMoneyUA(net)} грн</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
             <div className="mt-4 overflow-auto rounded-2xl border border-white/10">
               <table className="min-w-full text-sm">
                 <thead className="bg-white/5 text-slate-300">

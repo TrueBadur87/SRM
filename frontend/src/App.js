@@ -20,17 +20,18 @@ function Card(props) {
 function Modal(props) {
     if (!props.open)
         return null;
-    return (_jsxs("div", { className: "fixed inset-0 z-50 flex items-center justify-center p-4", children: [_jsx("div", { className: "absolute inset-0 bg-black/70", onClick: props.onClose }), _jsxs("div", { className: "relative w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-900 shadow-xl", children: [_jsxs("div", { className: "flex items-center justify-between border-b border-white/10 p-4", children: [_jsx("div", { className: "text-lg font-semibold", children: props.title }), _jsx("button", { className: "rounded-xl px-3 py-1 text-slate-300 hover:bg-white/5", onClick: props.onClose, children: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C" })] }), _jsx("div", { className: "p-4", children: props.children })] })] }));
+    return (_jsxs("div", { className: "fixed inset-0 z-50 flex items-center justify-center p-4", children: [_jsx("div", { className: "absolute inset-0 bg-black/70", onClick: props.onClose }), _jsxs("div", { className: "relative w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-900 shadow-xl", children: [_jsxs("div", { className: "flex items-center justify-between border-b border-white/10 p-4", children: [_jsx("div", { className: "text-lg font-semibold", children: props.title }), _jsx("button", { className: "rounded-xl px-3 py-1 text-slate-300 hover:bg-white/5", onClick: props.onClose, children: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C" })] }), _jsx("div", { className: "p-4 max-h-[80vh] overflow-auto", children: props.children })] })] }));
 }
 // Styled input component
 function Input(props) {
     return (_jsx("input", { ...props, className: "w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none " +
-            "placeholder:text-slate-500 focus:border-sky-500/40" }));
+            "text-[color:var(--app-input-text)] placeholder:text-slate-500 " +
+            "focus:border-sky-500/40" }));
 }
 // Styled select component
 function Select(props) {
     return (_jsx("select", { ...props, className: "w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none " +
-            "focus:border-sky-500/40" }));
+            "text-[color:var(--app-input-text)] focus:border-sky-500/40" }));
 }
 // Styled button component with variants
 function Button(props) {
@@ -73,6 +74,7 @@ function downloadCSV(filename, rows) {
 const THEME_KEY = "crm.theme";
 const TOKEN_KEY = "crm.token";
 const REMEMBER_KEY = "crm.remember";
+const TEXT_ZOOM_KEY = "crm.textZoom";
 const TIPS = [
     "Лайфхак: оплата теперь “правильная” через платежи — можно разбивать на части. Воронка показывает сумму всех платежей и последнюю дату.",
     "Совет: если всё вводить правильно с первого раза, потом не придётся ничего менять.",
@@ -91,6 +93,10 @@ export default function App() {
         if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)
             return "dark";
         return "light";
+    });
+    const [textZoom, setTextZoom] = useState(() => {
+        const stored = Number(localStorage.getItem(TEXT_ZOOM_KEY) || "100");
+        return Number.isFinite(stored) && stored >= 80 && stored <= 140 ? stored : 100;
     });
     const [authUser, setAuthUser] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
@@ -133,6 +139,7 @@ export default function App() {
     const [newUser, setNewUser] = useState({ username: "", password: "", role: "user", recruiter_id: "" });
     const [openEditUser, setOpenEditUser] = useState(null);
     const [editUser, setEditUser] = useState({ username: "", password: "", role: "user", recruiter_id: "" });
+    const [showTax, setShowTax] = useState(false);
     // Application form initial values
     const today = new Date().toISOString().slice(0, 10);
     const [addForm, setAddForm] = useState({
@@ -245,7 +252,34 @@ export default function App() {
     useEffect(() => {
         document.documentElement.dataset.theme = theme;
         localStorage.setItem(THEME_KEY, theme);
+        const root = document.documentElement;
+        root.style.setProperty("--app-input-text", theme === "dark" ? "#f1f5f9" : "#0f172a");
     }, [theme]);
+    useEffect(() => {
+        const html = document.documentElement;
+        const prev = html.style.scrollbarGutter;
+        html.style.scrollbarGutter = "stable";
+        return () => {
+            html.style.scrollbarGutter = prev;
+        };
+    }, []);
+    useEffect(() => {
+        const body = document.body;
+        const prev = body.style.overflowY;
+        body.style.overflowY = "scroll";
+        return () => {
+            body.style.overflowY = prev;
+        };
+    }, []);
+    useEffect(() => {
+        localStorage.setItem(TEXT_ZOOM_KEY, String(textZoom));
+    }, [textZoom]);
+    useEffect(() => {
+        document.documentElement.style.fontSize = `${textZoom}%`;
+        return () => {
+            document.documentElement.style.fontSize = "";
+        };
+    }, [textZoom]);
     useEffect(() => {
         localStorage.setItem(REMEMBER_KEY, String(rememberUser));
     }, [rememberUser]);
@@ -306,6 +340,7 @@ export default function App() {
         const paidSum = pipeline.reduce((sum, p) => sum + (p.payment_amount || 0), 0);
         return { total, hired, paidCount, paidSum: Math.round(paidSum * 100) / 100 };
     }, [pipeline]);
+    const formatMoneyUA = (value) => value.toFixed(2).replace(".", ",");
     // Create a client
     async function addClient() {
         if (!newClientName.trim())
@@ -720,6 +755,9 @@ export default function App() {
     const [repMonth, setRepMonth] = useState(now.getMonth() + 1);
     const [repTotal, setRepTotal] = useState(null);
     const [repItems, setRepItems] = useState([]);
+    useEffect(() => {
+        setShowTax(false);
+    }, [repTotal, repYear, repMonth]);
     // Load earnings report for selected year and month
     async function loadReport() {
         setErr(null);
@@ -761,7 +799,30 @@ export default function App() {
         : ["Воронка", "Клиенты", "Вакансии", "Рекрутеры", "Отчеты"];
     const isAdmin = authUser.role === "admin";
     // UI Rendering
-    return (_jsxs("div", { className: "min-h-screen", children: [_jsx("div", { className: "sticky top-0 z-40 border-b border-white/10 bg-slate-950/80 backdrop-blur", children: _jsxs("div", { className: "mx-auto max-w-6xl px-4 py-4", children: [_jsxs("div", { className: "flex flex-col gap-3 md:flex-row md:items-start md:justify-between", children: [_jsxs("div", { children: [_jsx("div", { className: "text-xl font-semibold", children: "Recruiting CRM" }), _jsx("div", { className: "text-xs text-slate-400", children: "fee \u0443 \u0432\u0430\u043A\u0430\u043D\u0441\u0438\u0439, \u043F\u043B\u0430\u0442\u0435\u0436\u0438 (\u0447\u0430\u0441\u0442\u0438\u0447\u043D\u044B\u0435), \u0437\u0430\u043C\u0435\u043D\u044B \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430, CSV" })] }), _jsxs("div", { className: "flex items-center justify-end gap-2", children: [_jsx(Button, { variant: "ghost", onClick: () => setTheme((t) => (t === "dark" ? "light" : "dark")), "aria-label": "Toggle theme", className: "theme-toggle", children: theme === "dark" ? "Dark" : "Light" }), _jsx(Button, { variant: "ghost", onClick: handleLogout, children: "\u0412\u044B\u0439\u0442\u0438" })] })] }), _jsxs("div", { className: "mt-3 flex flex-col md:flex-row md:items-center gap-2", children: [_jsxs("div", { className: "text-xs text-slate-400", children: ["\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C: ", authUser.username] }), _jsx("div", { className: "flex gap-2 flex-wrap items-center", children: tabs.map((t) => (_jsx("button", { onClick: () => setTab(t), className: "rounded-xl px-3 py-2 text-sm border transition " +
+    return (_jsxs("div", { className: "min-h-screen", children: [_jsx("div", { className: "fixed inset-0 z-50 pointer-events-none", children: _jsxs("div", { className: "absolute rounded-2xl border border-white/10 bg-slate-950/80 shadow-lg backdrop-blur pointer-events-auto", style: {
+                        left: "calc(100vw - 80px)",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        width: 64,
+                        height: 200,
+                        fontSize: 12,
+                        position: "relative",
+                    }, children: [_jsx("div", { className: "uppercase tracking-wide text-slate-400", style: { fontSize: 10, position: "absolute", top: 10, left: 10 }, children: "Zoom" }), _jsxs("div", { style: {
+                                position: "absolute",
+                                top: 34,
+                                left: 10,
+                                right: 10,
+                                bottom: 10,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 8,
+                            }, children: [_jsx("input", { type: "range", min: 80, max: 140, step: 5, value: textZoom, onChange: (e) => setTextZoom(Number(e.target.value)), className: "cursor-pointer accent-sky-400", style: {
+                                        width: 140,
+                                        height: 16,
+                                        transform: "rotate(-90deg)",
+                                        transformOrigin: "center",
+                                    }, "aria-label": "Text zoom" }), _jsxs("div", { className: "text-slate-300", style: { width: 40, textAlign: "right", fontSize: 12 }, children: [textZoom, "%"] })] })] }) }), _jsx("div", { className: "sticky top-0 z-40 border-b border-white/10 bg-slate-950/80 backdrop-blur", children: _jsxs("div", { className: "mx-auto max-w-6xl px-4 py-4", children: [_jsxs("div", { className: "flex flex-col gap-3 md:flex-row md:items-start md:justify-between", children: [_jsxs("div", { children: [_jsx("div", { className: "text-xl font-semibold", children: "Recruiting CRM" }), _jsx("div", { className: "text-xs text-slate-400", children: "fee \u0443 \u0432\u0430\u043A\u0430\u043D\u0441\u0438\u0439, \u043F\u043B\u0430\u0442\u0435\u0436\u0438 (\u0447\u0430\u0441\u0442\u0438\u0447\u043D\u044B\u0435), \u0437\u0430\u043C\u0435\u043D\u044B \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430, CSV" })] }), _jsxs("div", { className: "flex items-center justify-end gap-2", children: [_jsx(Button, { variant: "ghost", onClick: () => setTheme((t) => (t === "dark" ? "light" : "dark")), "aria-label": "Toggle theme", className: "theme-toggle", children: theme === "dark" ? "Dark" : "Light" }), _jsx(Button, { variant: "ghost", onClick: handleLogout, children: "\u0412\u044B\u0439\u0442\u0438" })] })] }), _jsxs("div", { className: "mt-3 flex flex-col md:flex-row md:items-center gap-2", children: [_jsxs("div", { className: "text-xs text-slate-400", children: ["\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C: ", authUser.username] }), _jsx("div", { className: "flex gap-2 flex-wrap items-center", children: tabs.map((t) => (_jsx("button", { onClick: () => setTab(t), className: "rounded-xl px-3 py-2 text-sm border transition " +
                                             (tab === t
                                                 ? "bg-white/10 border-white/15 text-white"
                                                 : "bg-transparent border-white/10 text-slate-300 hover:bg-white/5"), children: t }, t))) })] })] }) }), _jsxs("div", { className: "mx-auto max-w-6xl px-4 py-6", children: [err ? (_jsx("div", { className: "mb-4 rounded-2xl border border-rose-500/25 bg-rose-500/10 p-3 text-rose-100 text-sm", children: err })) : null, tab === "Воронка" && (_jsxs(_Fragment, { children: [_jsxs("div", { className: "grid grid-cols-1 md:grid-cols-4 gap-3", children: [_jsx(Card, { title: "\u0412\u0441\u0435\u0433\u043E", value: stats.total }), _jsx(Card, { title: "Hired", value: stats.hired }), _jsx(Card, { title: "\u041E\u043F\u043B\u0430\u0447\u0435\u043D\u043E (\u0448\u0442.)", value: stats.paidCount }), _jsx(Card, { title: "\u041E\u043F\u043B\u0430\u0447\u0435\u043D\u043E (\u0441\u0443\u043C\u043C\u0430)", value: stats.paidSum, hint: "\u0441\u0443\u043C\u043C\u0430 \u0432\u0441\u0435\u0445 \u043F\u043B\u0430\u0442\u0435\u0436\u0435\u0439 \u043F\u043E \u0432\u043E\u0440\u043E\u043D\u043A\u0435" })] }), _jsx("div", { className: "mt-5 rounded-2xl border border-white/10 bg-white/5 p-4", children: _jsxs("div", { className: "flex flex-col md:flex-row md:items-end gap-3 justify-between", children: [_jsxs("div", { className: "grid grid-cols-1 md:grid-cols-4 gap-3 w-full", children: [_jsxs("div", { children: [_jsx("div", { className: "text-xs text-slate-400 mb-1", children: "\u041A\u043B\u0438\u0435\u043D\u0442" }), _jsxs(Select, { value: filters.client_id ?? "", onChange: (e) => setFilters((f) => ({ ...f, client_id: e.target.value ? Number(e.target.value) : undefined })), children: [_jsx("option", { value: "", children: "\u0412\u0441\u0435" }), clients.map((c) => (_jsx("option", { value: c.id, children: c.name }, c.id)))] })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-slate-400 mb-1", children: "\u0420\u0435\u043A\u0440\u0443\u0442\u0435\u0440" }), _jsxs(Select, { value: filters.recruiter_id ?? "", onChange: (e) => setFilters((f) => ({ ...f, recruiter_id: e.target.value ? Number(e.target.value) : undefined })), disabled: !isAdmin, children: [_jsx("option", { value: "", children: "\u0412\u0441\u0435" }), recruiters.map((r) => (_jsx("option", { value: r.id, children: r.name }, r.id)))] })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-slate-400 mb-1", children: "\u0421\u0442\u0430\u0442\u0443\u0441" }), _jsxs(Select, { value: filters.status ?? "", onChange: (e) => setFilters((f) => ({ ...f, status: e.target.value ? e.target.value : undefined })), children: [_jsx("option", { value: "", children: "\u0412\u0441\u0435" }), _jsx("option", { value: "new", children: "new" }), _jsx("option", { value: "in_process", children: "in_process" }), _jsx("option", { value: "rejected", children: "rejected" }), _jsx("option", { value: "hired", children: "hired" })] })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-slate-400 mb-1", children: "\u041F\u043E\u0438\u0441\u043A" }), _jsx(Input, { placeholder: "\u043A\u0430\u043D\u0434\u0438\u0434\u0430\u0442, \u0432\u0430\u043A\u0430\u043D\u0441\u0438\u044F, \u043A\u043B\u0438\u0435\u043D\u0442, \u0440\u0435\u043A\u0440\u0443\u0442\u0435\u0440", value: filters.search ?? "", onChange: (e) => setFilters((f) => ({ ...f, search: e.target.value || undefined })) })] })] }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { variant: "ghost", onClick: () => refreshPipeline(), disabled: loading, children: "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C" }), _jsx(Button, { variant: "ghost", onClick: () => {
@@ -811,5 +872,13 @@ export default function App() {
                                                             application_id: it.application_id,
                                                             payment_id: it.payment_id,
                                                         })));
-                                                    }, children: "\u042D\u043A\u0441\u043F\u043E\u0440\u0442 CSV" }) })] }), _jsxs("div", { className: "text-right", children: [_jsx("div", { className: "text-xs text-slate-400", children: "\u0418\u0442\u043E\u0433\u043E \u0437\u0430 \u043C\u0435\u0441\u044F\u0446" }), _jsx("div", { className: "text-2xl font-semibold", children: repTotal ?? "-" })] })] }), _jsx("div", { className: "mt-4 overflow-auto rounded-2xl border border-white/10", children: _jsxs("table", { className: "min-w-full text-sm", children: [_jsx("thead", { className: "bg-white/5 text-slate-300", children: _jsxs("tr", { children: [_jsx("th", { className: "text-left p-3", children: "\u0414\u0430\u0442\u0430 \u043E\u043F\u043B\u0430\u0442\u044B" }), _jsx("th", { className: "text-left p-3", children: "\u0421\u0443\u043C\u043C\u0430" }), _jsx("th", { className: "text-left p-3", children: "\u041A\u0430\u043D\u0434\u0438\u0434\u0430\u0442" }), _jsx("th", { className: "text-left p-3", children: "\u041A\u043B\u0438\u0435\u043D\u0442" }), _jsx("th", { className: "text-left p-3", children: "\u0412\u0430\u043A\u0430\u043D\u0441\u0438\u044F" }), _jsx("th", { className: "text-left p-3", children: "\u0420\u0435\u043A\u0440\u0443\u0442\u0435\u0440" })] }) }), _jsxs("tbody", { children: [repItems.map((it, idx) => (_jsxs("tr", { className: "border-t border-white/10 hover:bg-white/5", children: [_jsx("td", { className: "p-3", children: it.paid_date }), _jsx("td", { className: "p-3 font-medium", children: it.amount }), _jsx("td", { className: "p-3", children: it.candidate_name }), _jsx("td", { className: "p-3", children: it.client_name }), _jsx("td", { className: "p-3", children: it.vacancy_title }), _jsx("td", { className: "p-3", children: it.recruiter_name })] }, idx))), repItems.length === 0 && (_jsx("tr", { children: _jsx("td", { className: "p-5 text-slate-400", colSpan: 6, children: "\u0417\u0430 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u0439 \u043C\u0435\u0441\u044F\u0446 \u043F\u043B\u0430\u0442\u0435\u0436\u0435\u0439 \u043D\u0435\u0442." }) }))] })] }) })] })), _jsx("div", { className: "mt-6 text-xs text-slate-500", children: tip })] })] }));
+                                                    }, children: "\u042D\u043A\u0441\u043F\u043E\u0440\u0442 CSV" }) }), _jsx("div", { className: "flex items-end", children: _jsx(Button, { variant: "ghost", onClick: () => setShowTax((v) => !v), disabled: repTotal == null, children: showTax ? "Скрыть налог" : "Показать налог" }) })] }), _jsxs("div", { className: "text-right", children: [_jsx("div", { className: "text-xs text-slate-400", children: "\u0418\u0442\u043E\u0433\u043E \u0437\u0430 \u043C\u0435\u0441\u044F\u0446" }), _jsx("div", { className: "text-2xl font-semibold", children: repTotal ?? "-" })] })] }), showTax && repTotal != null && (_jsx("div", { className: "mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-sm", children: (() => {
+                                    const income = repTotal;
+                                    const singleTax = income * 0.05;
+                                    const militaryTax = income * 0.01;
+                                    const esv = 1902.34;
+                                    const totalTax = singleTax + militaryTax + esv;
+                                    const net = income - totalTax;
+                                    return (_jsxs("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3", children: [_jsxs("div", { children: [_jsx("div", { className: "text-xs text-slate-400 mb-1", children: "\u0404\u0434\u0438\u043D\u0438\u0439 \u043F\u043E\u0434\u0430\u0442\u043E\u043A (5%)" }), _jsxs("div", { className: "font-semibold", children: [formatMoneyUA(singleTax), " \u0433\u0440\u043D"] })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-slate-400 mb-1", children: "\u0412\u0456\u0439\u0441\u044C\u043A\u043E\u0432\u0438\u0439 \u0437\u0431\u0456\u0440 (1%)" }), _jsxs("div", { className: "font-semibold", children: [formatMoneyUA(militaryTax), " \u0433\u0440\u043D"] })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-slate-400 mb-1", children: "\u0404\u0421\u0412 (\u043C\u0456\u043D\u0456\u043C\u0443\u043C)" }), _jsxs("div", { className: "font-semibold", children: [formatMoneyUA(esv), " \u0433\u0440\u043D"] })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-slate-400 mb-1", children: "\u0423\u0441\u044C\u043E\u0433\u043E \u043F\u043E\u0434\u0430\u0442\u043A\u0456\u0432" }), _jsxs("div", { className: "text-lg font-semibold", children: [formatMoneyUA(totalTax), " \u0433\u0440\u043D"] })] }), _jsxs("div", { className: "md:col-span-2", children: [_jsx("div", { className: "text-xs text-slate-400 mb-1", children: "\u0414\u043E\u0445\u0456\u0434 \u043F\u0456\u0441\u043B\u044F \u043F\u043E\u0434\u0430\u0442\u043A\u0456\u0432" }), _jsxs("div", { className: "text-lg font-semibold", children: [formatMoneyUA(net), " \u0433\u0440\u043D"] })] })] }));
+                                })() })), _jsx("div", { className: "mt-4 overflow-auto rounded-2xl border border-white/10", children: _jsxs("table", { className: "min-w-full text-sm", children: [_jsx("thead", { className: "bg-white/5 text-slate-300", children: _jsxs("tr", { children: [_jsx("th", { className: "text-left p-3", children: "\u0414\u0430\u0442\u0430 \u043E\u043F\u043B\u0430\u0442\u044B" }), _jsx("th", { className: "text-left p-3", children: "\u0421\u0443\u043C\u043C\u0430" }), _jsx("th", { className: "text-left p-3", children: "\u041A\u0430\u043D\u0434\u0438\u0434\u0430\u0442" }), _jsx("th", { className: "text-left p-3", children: "\u041A\u043B\u0438\u0435\u043D\u0442" }), _jsx("th", { className: "text-left p-3", children: "\u0412\u0430\u043A\u0430\u043D\u0441\u0438\u044F" }), _jsx("th", { className: "text-left p-3", children: "\u0420\u0435\u043A\u0440\u0443\u0442\u0435\u0440" })] }) }), _jsxs("tbody", { children: [repItems.map((it, idx) => (_jsxs("tr", { className: "border-t border-white/10 hover:bg-white/5", children: [_jsx("td", { className: "p-3", children: it.paid_date }), _jsx("td", { className: "p-3 font-medium", children: it.amount }), _jsx("td", { className: "p-3", children: it.candidate_name }), _jsx("td", { className: "p-3", children: it.client_name }), _jsx("td", { className: "p-3", children: it.vacancy_title }), _jsx("td", { className: "p-3", children: it.recruiter_name })] }, idx))), repItems.length === 0 && (_jsx("tr", { children: _jsx("td", { className: "p-5 text-slate-400", colSpan: 6, children: "\u0417\u0430 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u0439 \u043C\u0435\u0441\u044F\u0446 \u043F\u043B\u0430\u0442\u0435\u0436\u0435\u0439 \u043D\u0435\u0442." }) }))] })] }) })] })), _jsx("div", { className: "mt-6 text-xs text-slate-500", children: tip })] })] }));
 }
