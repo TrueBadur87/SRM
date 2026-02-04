@@ -6,12 +6,23 @@
  * FastAPI server. It centralizes the API base URL and response handling.
  */
 
-const API = "http://localhost:8000";
+const API = "http://localhost:15000";
+
+const TOKEN_KEY = "crm.token";
+
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+}
 
 // Generic HTTP helper that wraps fetch with default headers and error handling.
 async function http<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getToken();
   const res = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options?.headers || {})
+    },
     ...options,
   });
   if (!res.ok) {
@@ -33,6 +44,7 @@ export type Vacancy = {
   client_id: number;
   title: string;
   fee_amount: number;
+  city: string | null;
 };
 
 // Representation of a pipeline row returned from the backend. This is a
@@ -144,22 +156,30 @@ export type EarningsReport = {
   items: EarningsItem[];
 };
 
+// User/auth types
+export type User = { id: number; username: string; role: "admin" | "user"; recruiter_id: number | null };
+export type LoginResponse = { token: string; user: User };
+
 // API wrapper functions
 export const api = {
   // Clients
   clients: () => http<Client[]>("/clients"),
   createClient: (name: string) => http<Client>("/clients", { method: "POST", body: JSON.stringify({ name }) }),
+  updateClient: (id: number, name: string) => http<Client>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   deleteClient: (id: number) => http<{ deleted: true }>(`/clients/${id}`, { method: "DELETE" }),
 
   // Recruiters
   recruiters: () => http<Recruiter[]>("/recruiters"),
   createRecruiter: (name: string) => http<Recruiter>("/recruiters", { method: "POST", body: JSON.stringify({ name }) }),
+  updateRecruiter: (id: number, name: string) => http<Recruiter>(`/recruiters/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   deleteRecruiter: (id: number) => http<{ deleted: true }>(`/recruiters/${id}`, { method: "DELETE" }),
 
   // Vacancies
   vacancies: (client_id?: number) => http<Vacancy[]>(client_id ? `/vacancies?client_id=${client_id}` : "/vacancies"),
-  createVacancy: (payload: { client_id: number; title: string; fee_amount: number }) =>
+  createVacancy: (payload: { client_id: number; title: string; fee_amount: number; city?: string | null }) =>
     http<Vacancy>("/vacancies", { method: "POST", body: JSON.stringify(payload) }),
+  updateVacancy: (id: number, payload: { client_id?: number; title?: string; fee_amount?: number; city?: string | null }) =>
+    http<Vacancy>(`/vacancies/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteVacancy: (id: number) => http<{ deleted: true }>(`/vacancies/${id}`, { method: "DELETE" }),
 
   // Candidates
@@ -192,4 +212,17 @@ export const api = {
 
   // Earnings report
   earnings: (year: number, month: number) => http<EarningsReport>(`/reports/earnings?year=${year}&month=${month}`),
+
+  // Auth
+  login: (username: string, password: string) =>
+    http<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+  me: () => http<User>("/auth/me"),
+
+  // Users (admin)
+  users: () => http<User[]>("/users"),
+  createUser: (payload: { username: string; password: string; role: "admin" | "user"; recruiter_id?: number | null }) =>
+    http<User>("/users", { method: "POST", body: JSON.stringify(payload) }),
+  updateUser: (id: number, payload: { username?: string; password?: string; role?: "admin" | "user"; recruiter_id?: number | null }) =>
+    http<User>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteUser: (id: number) => http<{ deleted: true }>(`/users/${id}`, { method: "DELETE" }),
 };

@@ -13,10 +13,13 @@ from pydantic import BaseModel, Field
 
 __all__ = [
     "ClientCreate",
+    "ClientUpdate",
     "ClientOut",
     "RecruiterCreate",
+    "RecruiterUpdate",
     "RecruiterOut",
     "VacancyCreate",
+    "VacancyUpdate",
     "VacancyOut",
     "CandidateCreate",
     "CandidateOut",
@@ -28,6 +31,11 @@ __all__ = [
     "ApplicationRow",
     "EarningsItem",
     "EarningsReport",
+    "UserCreate",
+    "UserUpdate",
+    "UserOut",
+    "LoginRequest",
+    "LoginResponse",
 ]
 
 
@@ -37,6 +45,10 @@ class ClientBase(BaseModel):
 
 
 class ClientCreate(ClientBase):
+    pass
+
+
+class ClientUpdate(ClientBase):
     pass
 
 
@@ -56,6 +68,10 @@ class RecruiterCreate(RecruiterBase):
     pass
 
 
+class RecruiterUpdate(RecruiterBase):
+    pass
+
+
 class RecruiterOut(RecruiterBase):
     id: int
 
@@ -68,10 +84,18 @@ class VacancyBase(BaseModel):
     client_id: int
     title: str = Field(min_length=1, max_length=180)
     fee_amount: float = 0.0
+    city: str | None = Field(default=None, max_length=120)
 
 
 class VacancyCreate(VacancyBase):
     pass
+
+
+class VacancyUpdate(BaseModel):
+    client_id: int | None = None
+    title: str | None = Field(default=None, max_length=180)
+    fee_amount: float | None = None
+    city: str | None = Field(default=None, max_length=120)
 
 
 class VacancyOut(VacancyBase):
@@ -227,3 +251,38 @@ class EarningsReport(BaseModel):
     month: int
     total: float
     items: list[EarningsItem]
+
+
+# ------------------ Users / Auth ------------------
+class UserBase(BaseModel):
+    username: str = Field(min_length=1, max_length=120)
+    role: str = Field(default="user", max_length=20)
+    recruiter_id: int | None = None
+
+
+class UserCreate(UserBase):
+    password: str = Field(min_length=4, max_length=120)
+
+
+class UserUpdate(BaseModel):
+    username: str | None = Field(default=None, max_length=120)
+    role: str | None = Field(default=None, max_length=20)
+    recruiter_id: int | None = None
+    password: str | None = Field(default=None, max_length=120)
+
+
+class UserOut(UserBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    user: UserOut
