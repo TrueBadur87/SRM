@@ -49,6 +49,21 @@ class Recruiter(Base):
     applications = relationship("Application", back_populates="recruiter")
 
 
+class User(Base):
+    """Represents an authenticated user account."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    username: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(128))
+    password_salt: Mapped[str] = mapped_column(String(64))
+    role: Mapped[str] = mapped_column(String(20), index=True)  # admin, user
+    recruiter_id: Mapped[int | None] = mapped_column(ForeignKey("recruiters.id"), nullable=True, index=True)
+
+    recruiter = relationship("Recruiter")
+
+
 class Vacancy(Base):
     """Represents an open vacancy at a client company."""
 
@@ -58,6 +73,7 @@ class Vacancy(Base):
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
     title: Mapped[str] = mapped_column(String(180), index=True)
     fee_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     # Relationship to parent client
     client = relationship("Client", back_populates="vacancies")

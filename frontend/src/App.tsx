@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { api, Client, Recruiter, Vacancy, PipelineRow, Payment } from "./api";
+import { api, Client, Recruiter, Vacancy, PipelineRow, Payment, User } from "./api";
 
-// Define the available tabs in the UI
-type Tab = "Воронка" | "Клиенты" | "Вакансии" | "Рекрутеры" | "Отчеты";
+// Define the available tabs and themes in the UI
+type Theme = "dark" | "light";
+type Tab = "Воронка" | "Клиенты" | "Вакансии" | "Рекрутеры" | "Отчеты" | "Пользователи";
 
 // Utility for rendering a status badge with appropriate colours
 const badge = (status: string) => {
@@ -120,12 +121,38 @@ function downloadCSV(filename: string, rows: Array<Record<string, unknown>>) {
   a.remove();
   URL.revokeObjectURL(url);
 }
-// Key for storing the active recruiter selection in localStorage
-const ACTIVE_RECRUITER_KEY = "crm.activeRecruiterId";
+const THEME_KEY = "crm.theme";
+const TOKEN_KEY = "crm.token";
+const REMEMBER_KEY = "crm.remember";
+const TIPS = [
+  "Лайфхак: оплата теперь “правильная” через платежи — можно разбивать на части. Воронка показывает сумму всех платежей и последнюю дату.",
+  "Совет: если всё вводить правильно с первого раза, потом не придётся ничего менять.",
+  "Совет: добавляй заметки сразу — через неделю детали забудутся.",
+  "Лайфхак: фильтры в воронке можно комбинировать, чтобы быстро найти нужные заявки.",
+  "Совет: сначала заполни клиента и рекрутера, потом добавляй вакансии — так меньше ошибок.",
+  "Лайфхак: для замен используйте пометку “replacement”, чтобы не потерять историю.",
+];
+
 
 export default function App() {
   // Active tab state
   const [tab, setTab] = useState<Tab>("Воронка");
+
+  const [theme, setTheme] = useState<Theme>(() => {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
+    return "light";
+  });
+
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [openSettings, setOpenSettings] = useState(false);
+  const [rememberUser, setRememberUser] = useState(() => localStorage.getItem(REMEMBER_KEY) === "true");
+
 
   // Master data lists
   const [clients, setClients] = useState<Client[]>([]);
@@ -133,14 +160,9 @@ export default function App() {
   const [vacancies, setVacancies] = useState<Vacancy[]>([]);
   const [pipeline, setPipeline] = useState<PipelineRow[]>([]);
 
-  // Active recruiter ID stored in localStorage to persist across sessions
-  const [activeRecruiterId, setActiveRecruiterId] = useState<number | "">(() => {
-    const v = localStorage.getItem(ACTIVE_RECRUITER_KEY);
-    return v ? Number(v) : "";
-  });
-
   // Filters for the pipeline
   const [filters, setFilters] = useState<{ client_id?: number; recruiter_id?: number; status?: string; search?: string }>({});
+  const tip = useMemo(() => TIPS[Math.floor(Math.random() * TIPS.length)], [tab]);
 
   // Modal state for adding and editing applications
   const [openAddApp, setOpenAddApp] = useState(false);
@@ -156,6 +178,21 @@ export default function App() {
   const [newVacancyTitle, setNewVacancyTitle] = useState("");
   const [newVacancyClientId, setNewVacancyClientId] = useState<number | "">("");
   const [newVacancyFee, setNewVacancyFee] = useState<number>(0);
+  const [newVacancyCity, setNewVacancyCity] = useState("");
+  const [openEditClient, setOpenEditClient] = useState<Client | null>(null);
+  const [editClientName, setEditClientName] = useState("");
+  const [openEditRecruiter, setOpenEditRecruiter] = useState<Recruiter | null>(null);
+  const [editRecruiterName, setEditRecruiterName] = useState("");
+  const [openEditVacancy, setOpenEditVacancy] = useState<Vacancy | null>(null);
+  const [editVacancyTitle, setEditVacancyTitle] = useState("");
+  const [editVacancyClientId, setEditVacancyClientId] = useState<number | "">("");
+  const [editVacancyFee, setEditVacancyFee] = useState<number>(0);
+  const [editVacancyCity, setEditVacancyCity] = useState("");
+  const [users, setUsers] = useState<User[]>([]);
+  const [newUser, setNewUser] = useState({ username: "", password: "", role: "user" as "admin" | "user", recruiter_id: "" as number | "" });
+  const [openEditUser, setOpenEditUser] = useState<User | null>(null);
+  const [editUser, setEditUser] = useState({ username: "", password: "", role: "user" as "admin" | "user", recruiter_id: "" as number | "" });
+
 
   // Application form initial values
   const today = new Date().toISOString().slice(0, 10);
@@ -207,31 +244,112 @@ export default function App() {
     }
   }
 
+  const getStoredToken = () => localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+
+  // Auth bootstrap
+  useEffect(() => {
+    const token = getStoredToken();
+    if (!token) {
+      setAuthLoading(false);
+      return;
+    }
+    api
+      .me()
+      .then((u) => setAuthUser(u))
+      .catch(() => {
+        localStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(TOKEN_KEY);
+      })
+      .finally(() => setAuthLoading(false));
+  }, []);
+
+  async function handleLogin() {
+    setLoginError(null);
+    if (!loginForm.username.trim() || !loginForm.password) {
+      setLoginError("Введите логин и пароль");
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      const res = await api.login(loginForm.username.trim(), loginForm.password);
+      localStorage.setItem("crm.token", res.token);
+      setAuthUser(res.user);
+      setLoginForm({ username: "", password: "" });
+    } catch (e: any) {
+      setLoginError(String(e?.message || e));
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  function handleLogout() {
+    if (!confirm("����� �� �������?")) return;
+    localStorage.removeItem("crm.token");
+    setAuthUser(null);
+    setTab("Воронка");
+  }
+
   // Initial load of master data
   useEffect(() => {
-    refreshAll();
-  }, []);
+    if (authUser) refreshAll();
+  }, [authUser?.id]);
 
   // Refresh pipeline whenever filters change
   useEffect(() => {
-    refreshPipeline();
-  }, [filters.client_id, filters.recruiter_id, filters.status, filters.search]);
-
-  // Persist active recruiter selection to localStorage and update default recruiter in add form
+    if (authUser) refreshPipeline();
+  }, [authUser?.id, filters.client_id, filters.recruiter_id, filters.status, filters.search]);
+  // Lock recruiter to current user for non-admin accounts
   useEffect(() => {
-    if (activeRecruiterId) {
-      localStorage.setItem(ACTIVE_RECRUITER_KEY, String(activeRecruiterId));
-      setAddForm((f) => ({ ...f, recruiter_id: activeRecruiterId }));
-    } else {
-      localStorage.removeItem(ACTIVE_RECRUITER_KEY);
+    if (authUser && authUser.role !== "admin") {
+      setAddForm((f) => ({ ...f, recruiter_id: authUser.recruiter_id || "" }));
     }
-  }, [activeRecruiterId]);
+  }, [authUser?.id, authUser?.role, authUser?.recruiter_id]);
+
+  // Apply and persist theme selection
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(REMEMBER_KEY, String(rememberUser));
+  }, [rememberUser]);
+
+  useEffect(() => {
+    if (!authUser) return;
+    const token = getStoredToken();
+    if (!token) return;
+    if (rememberUser) {
+      sessionStorage.removeItem(TOKEN_KEY);
+      localStorage.setItem(TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+      sessionStorage.setItem(TOKEN_KEY, token);
+    }
+  }, [rememberUser, authUser?.id]);
+
+  useEffect(() => {
+    const handler = () => {
+      if (!rememberUser) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(TOKEN_KEY);
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [rememberUser]);
 
   // Filter vacancies based on selected client for add form
   const filteredVacancies = useMemo(() => {
     if (!addForm.client_id) return vacancies;
     return vacancies.filter((v) => v.client_id === addForm.client_id);
   }, [vacancies, addForm.client_id]);
+
+  // Filter vacancies list in the Vacancies tab by selected client (if any)
+  const vacanciesForClient = useMemo(() => {
+    if (!newVacancyClientId) return vacancies;
+    return vacancies.filter((v) => v.client_id === newVacancyClientId);
+  }, [vacancies, newVacancyClientId]);
 
   // Determine the selected vacancy to auto-fill payment amount when initial payment is created
   const selectedVacancy = useMemo(() => {
@@ -285,14 +403,178 @@ export default function App() {
     }
   }
 
+  // Open edit forms
+  function openClientEdit(client: Client) {
+    setErr(null);
+    setOpenEditClient(client);
+    setEditClientName(client.name);
+  }
+
+  function openRecruiterEdit(recruiter: Recruiter) {
+    setErr(null);
+    setOpenEditRecruiter(recruiter);
+    setEditRecruiterName(recruiter.name);
+  }
+
+  function openVacancyEdit(vacancy: Vacancy) {
+    setErr(null);
+    setOpenEditVacancy(vacancy);
+    setEditVacancyTitle(vacancy.title);
+    setEditVacancyClientId(vacancy.client_id);
+    setEditVacancyFee(vacancy.fee_amount || 0);
+    setEditVacancyCity(vacancy.city || "");
+  }
+
+  // ЛогинРоль edited client or recruiter
+  async function saveEditClient() {
+    if (!openEditClient) return;
+    const name = editClientName.trim();
+    if (!name) return setErr("Введите имя клиента");
+    setLoading(true);
+    try {
+      await api.updateClient(openEditClient.id, name);
+      setOpenEditClient(null);
+      await refreshAll();
+      await refreshPipeline();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveEditRecruiter() {
+    if (!openEditRecruiter) return;
+    const name = editRecruiterName.trim();
+    if (!name) return setErr("Введите имя рекрутера");
+    setLoading(true);
+    try {
+      await api.updateRecruiter(openEditRecruiter.id, name);
+      setOpenEditRecruiter(null);
+      await refreshAll();
+      await refreshPipeline();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveEditVacancy() {
+    if (!openEditVacancy) return;
+    const title = editVacancyTitle.trim();
+    if (!title) return setErr("Введите название вакансии");
+    if (!editVacancyClientId) return setErr("Выберите клиента");
+    setLoading(true);
+    try {
+      await api.updateVacancy(openEditVacancy.id, {
+        client_id: Number(editVacancyClientId),
+        title,
+        fee_amount: Number(editVacancyFee || 0),
+        city: editVacancyCity.trim() || null,
+      });
+      setOpenEditVacancy(null);
+      await refreshAll();
+      await refreshPipeline();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshUsers() {
+    if (authUser?.role !== "admin") return;
+    setErr(null);
+    try {
+      const list = await api.users();
+      setUsers(list);
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    }
+  }
+
+  function openUserEdit(user: User) {
+    setErr(null);
+    setOpenEditUser(user);
+    setEditUser({
+      username: user.username,
+      password: "",
+      role: user.role,
+      recruiter_id: user.recruiter_id ?? "",
+    });
+  }
+
+  async function createUser() {
+    setErr(null);
+    if (!newUser.username.trim() || !newUser.password) {
+      return setErr("Введите логин и пароль");
+    }
+    if (newUser.role !== "admin" && !newUser.recruiter_id) {
+      return setErr("Для пользователя нужен рекрутер");
+    }
+    setLoading(true);
+    try {
+      await api.createUser({
+        username: newUser.username.trim(),
+        password: newUser.password,
+        role: newUser.role,
+        recruiter_id: newUser.role === "admin" ? null : Number(newUser.recruiter_id),
+      });
+      setNewUser({ username: "", password: "", role: "user", recruiter_id: "" });
+      await refreshUsers();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveEditUser() {
+    if (!openEditUser) return;
+    if (!editUser.username.trim()) return setErr("Введите логин");
+    if (editUser.role !== "admin" && !editUser.recruiter_id) {
+      return setErr("Для пользователя нужен рекрутер");
+    }
+    setLoading(true);
+    try {
+      await api.updateUser(openEditUser.id, {
+        username: editUser.username.trim(),
+        password: editUser.password || undefined,
+        role: editUser.role,
+        recruiter_id: editUser.role === "admin" ? null : Number(editUser.recruiter_id),
+      });
+      setOpenEditUser(null);
+      await refreshUsers();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deleteUser(id: number) {
+    if (!confirm("Удалить пользователя?")) return;
+    setLoading(true);
+    try {
+      await api.deleteUser(id);
+      await refreshUsers();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Create a vacancy
   async function addVacancy() {
     if (!newVacancyTitle.trim() || !newVacancyClientId) return;
     setLoading(true);
     try {
-      await api.createVacancy({ client_id: Number(newVacancyClientId), title: newVacancyTitle.trim(), fee_amount: Number(newVacancyFee || 0) });
+      await api.createVacancy({ client_id: Number(newVacancyClientId), title: newVacancyTitle.trim(), fee_amount: Number(newVacancyFee || 0), city: newVacancyCity.trim() || null });
       setNewVacancyTitle("");
       setNewVacancyFee(0);
+      setNewVacancyCity("");
       await refreshAll();
     } catch (e: any) {
       setErr(String(e?.message || e));
@@ -346,7 +628,7 @@ export default function App() {
         notes: "",
         client_id: "",
         vacancy_id: "",
-        recruiter_id: activeRecruiterId || "",
+        recruiter_id: authUser?.role !== "admin" ? authUser?.recruiter_id || "" : "",
         date_contacted: today,
         status: "new",
         rejection_date: "",
@@ -378,7 +660,7 @@ export default function App() {
     }
   }
 
-  // Save changes to an application (status, dates, replacement info)
+  // ЛогинРоль changes to an application (status, dates, replacement info)
   async function saveEditApplication(row: PipelineRow) {
     setErr(null);
     if (row.status === "rejected" && !row.rejection_date) return setErr("Для rejected нужна дата отказа");
@@ -489,17 +771,68 @@ export default function App() {
     if (tab === "Отчеты") loadReport();
   }, [tab]);
 
+  // Load users when switching to the users tab
+  useEffect(() => {
+    if (tab === "Пользователи") refreshUsers();
+  }, [tab]);
+
   // List of applications for selecting replacement application (in add/edit forms)
   const replacementOptions = useMemo(() => {
     return pipeline.slice(0, 500);
   }, [pipeline]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
+        <div className="text-sm text-slate-400">Загрузка...</div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100 p-4">
+        <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="text-lg font-semibold">Роль</div>
+          <div className="mt-4 space-y-3">
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Логин</div>
+              <Input
+                value={loginForm.username}
+                onChange={(e) => setLoginForm((f) => ({ ...f, username: e.target.value }))}
+              />
+            </div>
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Пароль</div>
+              <Input
+                type="password"
+                value={loginForm.password}
+                onChange={(e) => setLoginForm((f) => ({ ...f, password: e.target.value }))}
+              />
+            </div>
+            {loginError ? <div className="text-xs text-rose-200">{loginError}</div> : null}
+            <Button onClick={handleLogin} disabled={authBusy}>
+              Логин
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const tabs: Tab[] = authUser.role === "admin"
+    ? ["Воронка", "Клиенты", "Вакансии", "Рекрутеры", "Отчеты", "Пользователи"]
+    : ["Воронка", "Клиенты", "Вакансии", "Рекрутеры", "Отчеты"];
+  const isAdmin = authUser.role === "admin";
+
 
   // UI Rendering
   return (
     <div className="min-h-screen">
       {/* Header */}
       <div className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/80 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-4 py-4 flex flex-col md:flex-row md:items-center gap-3 justify-between">
+        <div className="mx-auto max-w-6xl px-4 py-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           {/* Title */}
           <div>
             <div className="text-xl font-semibold">Recruiting CRM</div>
@@ -507,25 +840,24 @@ export default function App() {
               fee у вакансий, платежи (частичные), замены из списка, CSV
             </div>
           </div>
-          {/* Active recruiter select and tab navigation */}
-          <div className="flex flex-col md:flex-row gap-2 md:items-center">
-            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
-              <div className="text-xs text-slate-400">Активный рекрутер</div>
-              <select
-                className="bg-transparent text-sm outline-none"
-                value={activeRecruiterId}
-                onChange={(e) => setActiveRecruiterId(e.target.value ? Number(e.target.value) : "")}
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+                aria-label="Toggle theme"
+                className="theme-toggle"
               >
-                <option value="">не выбран</option>
-                {recruiters.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
+                {theme === "dark" ? "Dark" : "Light"}
+              </Button>
+              <Button variant="ghost" onClick={handleLogout}>
+                Выйти
+              </Button>
             </div>
-            <div className="flex gap-2 flex-wrap">
-              {["Воронка", "Клиенты", "Вакансии", "Рекрутеры", "Отчеты"].map((t) => (
+          </div>
+          <div className="mt-3 flex flex-col md:flex-row md:items-center gap-2">
+              <div className="text-xs text-slate-400">Пользователь: {authUser.username}</div>
+            <div className="flex gap-2 flex-wrap items-center">
+              {tabs.map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t as Tab)}
@@ -542,8 +874,7 @@ export default function App() {
             </div>
           </div>
         </div>
-      </div>
-
+        </div>
       {/* Main content */}
       <div className="mx-auto max-w-6xl px-4 py-6">
         {/* Error message */}
@@ -588,6 +919,7 @@ export default function App() {
                     <Select
                       value={filters.recruiter_id ?? ""}
                       onChange={(e) => setFilters((f) => ({ ...f, recruiter_id: e.target.value ? Number(e.target.value) : undefined }))}
+                      disabled={!isAdmin}
                     >
                       <option value="">Все</option>
                       {recruiters.map((r) => (
@@ -776,6 +1108,7 @@ export default function App() {
                   <Select
                     value={addForm.recruiter_id}
                     onChange={(e) => setAddForm((f) => ({ ...f, recruiter_id: e.target.value ? Number(e.target.value) : "" }))}
+                    disabled={!isAdmin}
                   >
                     <option value="">Выбрать</option>
                     {recruiters.map((r) => (
@@ -784,7 +1117,6 @@ export default function App() {
                       </option>
                     ))}
                   </Select>
-                  <div className="mt-1 text-xs text-slate-500">Подставляется из “Активный рекрутер” сверху</div>
                 </div>
                 <div>
                   <div className="text-xs text-slate-400 mb-1">Дата общения</div>
@@ -1009,28 +1341,210 @@ export default function App() {
                 </div>
               )}
             </Modal>
+
           </>
         )}
+
+        {/* Edit client modal */}
+        <Modal
+          open={!!openEditClient}
+          title="Редактировать клиента"
+          onClose={() => setOpenEditClient(null)}
+        >
+          <div className="space-y-3">
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Имя клиента</div>
+              <Input value={editClientName} onChange={(e) => setEditClientName(e.target.value)} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpenEditClient(null)}>
+                Отмена
+              </Button>
+              <Button onClick={saveEditClient} disabled={loading}>
+                Сохранить
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Edit recruiter modal */}
+        <Modal
+          open={!!openEditRecruiter}
+          title="Редактировать рекрутера"
+          onClose={() => setOpenEditRecruiter(null)}
+        >
+          <div className="space-y-3">
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Имя рекрутера</div>
+              <Input value={editRecruiterName} onChange={(e) => setEditRecruiterName(e.target.value)} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpenEditRecruiter(null)}>
+                Отмена
+              </Button>
+              <Button onClick={saveEditRecruiter} disabled={loading}>
+                Сохранить
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Edit vacancy modal */}
+        <Modal
+          open={openSettings}
+          title="Настройки"
+          onClose={() => setOpenSettings(false)}
+        >
+          <div className="space-y-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={rememberUser}
+                onChange={(e) => setRememberUser(e.target.checked)}
+              />
+              <span>Запомнить пользователя на этом устройстве</span>
+            </label>
+            <div className="text-xs text-slate-400">
+              Если не запоминать, вход будет сбрасываться при закрытии окна.
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpenSettings(false)}>
+                Закрыть
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  handleLogout();
+                  setOpenSettings(false);
+                }}
+              >
+                Сменить пользователя
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        <Modal
+          open={!!openEditVacancy}
+          title="Редактировать вакансию"
+          onClose={() => setOpenEditVacancy(null)}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Клиент</div>
+              <Select
+                value={editVacancyClientId}
+                onChange={(e) => setEditVacancyClientId(e.target.value ? Number(e.target.value) : "")}
+              >
+                <option value="">Выбрать</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Название вакансии</div>
+              <Input value={editVacancyTitle} onChange={(e) => setEditVacancyTitle(e.target.value)} />
+            </div>
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Город</div>
+              <Input value={editVacancyCity} onChange={(e) => setEditVacancyCity(e.target.value)} />
+            </div>
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Fee (ставка)</div>
+              <Input type="number" value={editVacancyFee} onChange={(e) => setEditVacancyFee(Number(e.target.value))} />
+            </div>
+            <div className="md:col-span-2 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpenEditVacancy(null)}>
+                Пароль
+              </Button>
+              <Button onClick={saveEditVacancy} disabled={loading}>
+                ЛогинРоль
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Edit user modal */}
+        <Modal
+          open={!!openEditUser}
+          title="Редактировать пользователя"
+          onClose={() => setOpenEditUser(null)}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Логин</div>
+              <Input value={editUser.username} onChange={(e) => setEditUser((u) => ({ ...u, username: e.target.value }))} />
+            </div>
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Пароль (если нужно обновить)</div>
+              <Input type="password" value={editUser.password} onChange={(e) => setEditUser((u) => ({ ...u, password: e.target.value }))} />
+            </div>
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Роль</div>
+              <Select value={editUser.role} onChange={(e) => setEditUser((u) => ({ ...u, role: e.target.value as any }))}>
+                <option value="user">user</option>
+                <option value="admin">admin</option>
+              </Select>
+            </div>
+            <div>
+              <div className="text-xs text-slate-400 mb-1">Рекрутер</div>
+              <Select
+                value={editUser.recruiter_id}
+                onChange={(e) => setEditUser((u) => ({ ...u, recruiter_id: e.target.value ? Number(e.target.value) : "" }))}
+                disabled={editUser.role === "admin"}
+              >
+                <option value="">Выберите</option>
+                {recruiters.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="md:col-span-2 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpenEditUser(null)}>
+                Отмена
+              </Button>
+              <Button onClick={saveEditUser} disabled={loading}>
+                Сохранить
+              </Button>
+            </div>
+          </div>
+        </Modal>
 
         {/* Clients tab */}
         {tab === "Клиенты" && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <div className="text-xs text-slate-400 mb-1">Добавить клиента</div>
-                <Input value={newClientName} onChange={(e) => setNewClientName(e.target.value)} placeholder="например: Acme Corp" />
+            {isAdmin ? (
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <div className="text-xs text-slate-400 mb-1">Добавить клиента</div>
+                  <Input value={newClientName} onChange={(e) => setNewClientName(e.target.value)} placeholder="например: Acme Corp" />
+                </div>
+                <Button onClick={addClient} disabled={loading}>
+                  Добавить
+                </Button>
               </div>
-              <Button onClick={addClient} disabled={loading}>
-                Добавить
-              </Button>
-            </div>
+            ) : (
+              <div className="text-xs text-slate-400">Только администратор может добавлять клиентов.</div>
+            )}
             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
               {clients.map((c) => (
                 <div key={c.id} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 flex items-center justify-between">
                   <div className="font-medium">{c.name}</div>
-                  <Button variant="danger" onClick={() => api.deleteClient(c.id).then(refreshAll)} disabled={loading}>
-                    Удалить
-                  </Button>
+                  {isAdmin ? (
+                    <div className="flex items-center gap-2">
+                      <Button variant="ghost" onClick={() => openClientEdit(c)} disabled={loading}>
+                        Редактировать
+                      </Button>
+                      <Button variant="danger" onClick={() => api.deleteClient(c.id).then(refreshAll)} disabled={loading}>
+                        Удалить
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -1040,24 +1554,117 @@ export default function App() {
         {/* Recruiters tab */}
         {tab === "Рекрутеры" && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <div className="text-xs text-slate-400 mb-1">Добавить рекрутера</div>
-                <Input value={newRecruiterName} onChange={(e) => setNewRecruiterName(e.target.value)} placeholder="например: Kim" />
+            {isAdmin ? (
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <div className="text-xs text-slate-400 mb-1">Добавить рекрутера</div>
+                  <Input value={newRecruiterName} onChange={(e) => setNewRecruiterName(e.target.value)} placeholder="например: Kim" />
+                </div>
+                <Button onClick={addRecruiter} disabled={loading}>
+                  Добавить
+                </Button>
               </div>
-              <Button onClick={addRecruiter} disabled={loading}>
-                Добавить
-              </Button>
-            </div>
+            ) : (
+              <div className="text-xs text-slate-400">Только администратор может добавлять рекрутеров.</div>
+            )}
             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
               {recruiters.map((r) => (
                 <div key={r.id} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 flex items-center justify-between">
                   <div className="font-medium">{r.name}</div>
-                  <Button variant="danger" onClick={() => api.deleteRecruiter(r.id).then(refreshAll)} disabled={loading}>
-                    Удалить
-                  </Button>
+                  {isAdmin ? (
+                    <div className="flex items-center gap-2">
+                      <Button variant="ghost" onClick={() => openRecruiterEdit(r)} disabled={loading}>
+                        Редактировать
+                      </Button>
+                      <Button variant="danger" onClick={() => api.deleteRecruiter(r.id).then(refreshAll)} disabled={loading}>
+                        Удалить
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Users tab */}
+        {tab === "Пользователи" && (
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+              <div>
+                <div className="text-xs text-slate-400 mb-1">Логин</div>
+                <Input value={newUser.username} onChange={(e) => setNewUser((u) => ({ ...u, username: e.target.value }))} />
+              </div>
+              <div>
+                <div className="text-xs text-slate-400 mb-1">Пароль</div>
+                <Input type="password" value={newUser.password} onChange={(e) => setNewUser((u) => ({ ...u, password: e.target.value }))} />
+              </div>
+              <div>
+                <div className="text-xs text-slate-400 mb-1">Роль</div>
+                <Select value={newUser.role} onChange={(e) => setNewUser((u) => ({ ...u, role: e.target.value as any }))}>
+                  <option value="user">user</option>
+                  <option value="admin">admin</option>
+                </Select>
+              </div>
+              <div>
+                <div className="text-xs text-slate-400 mb-1">Рекрутер</div>
+                <Select
+                  value={newUser.recruiter_id}
+                  onChange={(e) => setNewUser((u) => ({ ...u, recruiter_id: e.target.value ? Number(e.target.value) : "" }))}
+                  disabled={newUser.role === "admin"}
+                >
+                  <option value="">Выберите</option>
+                  {recruiters.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="md:col-span-5 flex justify-end">
+                <Button onClick={createUser} disabled={loading}>
+                  Добавить пользователя
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-auto rounded-2xl border border-white/10">
+              <table className="min-w-full text-sm">
+                <thead className="bg-white/5 text-slate-300">
+                  <tr>
+                    <th className="text-left p-3">Логин</th>
+                    <th className="text-left p-3">Роль</th>
+                    <th className="text-left p-3">Рекрутер</th>
+                    <th className="text-left p-3"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.id} className="border-t border-white/10 hover:bg-white/5">
+                      <td className="p-3 font-medium">{u.username}</td>
+                      <td className="p-3">{u.role}</td>
+                      <td className="p-3">{recruiters.find((r) => r.id === u.recruiter_id)?.name ?? (u.recruiter_id ?? "-")}</td>
+                      <td className="p-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button variant="ghost" onClick={() => openUserEdit(u)} disabled={loading}>
+                            Редактировать
+                          </Button>
+                          <Button variant="danger" onClick={() => deleteUser(u.id)} disabled={loading}>
+                            Удалить
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {users.length === 0 && (
+                    <tr>
+                      <td className="p-5 text-slate-400" colSpan={4}>
+                        Пользователей нет.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -1065,58 +1672,75 @@ export default function App() {
         {/* Vacancies tab */}
         {tab === "Вакансии" && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-              <div>
-                <div className="text-xs text-slate-400 mb-1">Клиент</div>
-                <Select value={newVacancyClientId} onChange={(e) => setNewVacancyClientId(e.target.value ? Number(e.target.value) : "")}> 
-                  <option value="">Выбрать</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </Select>
+            {isAdmin ? (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                <div>
+                  <div className="text-xs text-slate-400 mb-1">Клиент</div>
+                  <Select value={newVacancyClientId} onChange={(e) => setNewVacancyClientId(e.target.value ? Number(e.target.value) : "")}> 
+                    <option value="">Выбрать</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="md:col-span-2">
+                  <div className="text-xs text-slate-400 mb-1">Название вакансии</div>
+                  <Input value={newVacancyTitle} onChange={(e) => setNewVacancyTitle(e.target.value)} placeholder="например: Senior Python Developer" />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-1">Город</div>
+                  <Input value={newVacancyCity} onChange={(e) => setNewVacancyCity(e.target.value)} placeholder="например: Киев" />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-1">Fee (ставка)</div>
+                  <Input type="number" value={newVacancyFee} onChange={(e) => setNewVacancyFee(Number(e.target.value))} />
+                </div>
+                <div className="md:col-span-5 flex justify-end">
+                  <Button onClick={addVacancy} disabled={loading}>
+                    Добавить вакансию
+                  </Button>
+                </div>
               </div>
-              <div className="md:col-span-2">
-                <div className="text-xs text-slate-400 mb-1">Название вакансии</div>
-                <Input value={newVacancyTitle} onChange={(e) => setNewVacancyTitle(e.target.value)} placeholder="например: Senior Python Developer" />
-              </div>
-              <div>
-                <div className="text-xs text-slate-400 mb-1">Fee (ставка)</div>
-                <Input type="number" value={newVacancyFee} onChange={(e) => setNewVacancyFee(Number(e.target.value))} />
-              </div>
-              <div className="md:col-span-4 flex justify-end">
-                <Button onClick={addVacancy} disabled={loading}>
-                  Добавить вакансию
-                </Button>
-              </div>
-            </div>
+            ) : (
+              <div className="text-xs text-slate-400">Только администратор может добавлять вакансии.</div>
+            )}
             <div className="mt-4 overflow-auto rounded-2xl border border-white/10">
               <table className="min-w-full text-sm">
                 <thead className="bg-white/5 text-slate-300">
                   <tr>
                     <th className="text-left p-3">Клиент</th>
                     <th className="text-left p-3">Вакансия</th>
-                    <th className="text-left p-3">Fee</th>
+                    <th className="text-left p-3">Город</th>
+                    <th className="text-left p-3">Fee (ставка)</th>
                     <th className="text-left p-3"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {vacancies.map((v) => (
+                  {vacanciesForClient.map((v) => (
                     <tr key={v.id} className="border-t border-white/10 hover:bg-white/5">
                       <td className="p-3">{clients.find((c) => c.id === v.client_id)?.name ?? v.client_id}</td>
                       <td className="p-3 font-medium">{v.title}</td>
+                      <td className="p-3">{v.city || "-"}</td>
                       <td className="p-3">{v.fee_amount}</td>
                       <td className="p-3 text-right">
-                        <Button variant="danger" onClick={() => api.deleteVacancy(v.id).then(refreshAll)} disabled={loading}>
-                          Удалить
-                        </Button>
+                        {isAdmin ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <Button variant="ghost" onClick={() => openVacancyEdit(v)} disabled={loading}>
+                              Редактировать
+                            </Button>
+                            <Button variant="danger" onClick={() => api.deleteVacancy(v.id).then(refreshAll)} disabled={loading}>
+                              Удалить
+                            </Button>
+                          </div>
+                        ) : null}
                       </td>
                     </tr>
                   ))}
-                  {vacancies.length === 0 && (
+                  {vacanciesForClient.length === 0 && (
                     <tr>
-                      <td className="p-5 text-slate-400" colSpan={4}>
+                      <td className="p-5 text-slate-400" colSpan={5}>
                         Добавь первую вакансию.
                       </td>
                     </tr>
@@ -1211,9 +1835,17 @@ export default function App() {
 
         {/* Footer tip */}
         <div className="mt-6 text-xs text-slate-500">
-          Лайфхак: оплата теперь “правильная” через платежи, можно разбивать на части. Воронка показывает сумму всех платежей и последнюю дату.
+          {tip}
         </div>
       </div>
     </div>
   );
 }
+
+
+
+
+
+
+
+
