@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, or_, text
 
-from database import Base, SessionLocal, engine
+from database import Base, SessionLocal, engine, DATABASE_URL
 from models import Client, Recruiter, Vacancy, Candidate, Application, Payment, User
 from schemas import (
     ClientCreate, ClientOut,
@@ -32,8 +32,10 @@ from schemas import (
 # Create database tables on startup
 Base.metadata.create_all(bind=engine)
 
-# Lightweight migration for the optional vacancy city column (SQLite).
+# Lightweight migration for the optional vacancy city column (SQLite only).
 def ensure_vacancy_city_column():
+    if not DATABASE_URL.startswith("sqlite"):
+        return  # PostgreSQL schema already has the city column
     try:
         with engine.connect() as conn:
             cols = conn.execute(text("PRAGMA table_info(vacancies)")).fetchall()
@@ -93,9 +95,11 @@ def get_db():
         db.close()
 
 
-# Seed initial clients on startup if none exist
+# Seed initial clients on startup if none exist (SQLite only - PostgreSQL is pre-seeded)
 @app.on_event("startup")
 def seed_initial_clients():
+    if not DATABASE_URL.startswith("sqlite"):
+        return  # PostgreSQL already has data
     db = SessionLocal()
     try:
         count = db.scalar(select(func.count()).select_from(Client))
@@ -110,6 +114,8 @@ def seed_initial_clients():
 
 @app.on_event("startup")
 def seed_initial_users():
+    if not DATABASE_URL.startswith("sqlite"):
+        return  # PostgreSQL already has data
     db = SessionLocal()
     try:
         # Ensure default recruiters exist
